@@ -1,0 +1,3 @@
+# Kask OS -- Python Requirements
+# Only standard library modules are used (struct, sys, os).
+# No pip packages required. Python 3.6+ needed.
