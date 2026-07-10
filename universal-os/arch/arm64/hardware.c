@@ -1,15 +1,12 @@
 #include "../../shared/kernel.h"
 
-// Define display geometry matching our QEMU boot arguments
 #define SCREEN_WIDTH  800
 #define SCREEN_HEIGHT 600
 
-// QEMU ramfb default allocation address for high memory framebuffers on the 'virt' board
-// We cast it as a 32-bit unsigned integer pointer (4 bytes per pixel: BGRA)
-volatile unsigned int* framebuffer = (volatile unsigned int*)0x3c000000;
+// Map the framebuffer to the base memory window initialized by QEMU's graphic pipeline
+volatile unsigned int* framebuffer = (volatile unsigned int*)0x40000000; 
 
-// Simple 8x8 bitmap font array for basic characters (A-Z and space)
-// 1 bits represent text pixels, 0 bits represent background
+// Simple 8x8 bitmap font array
 unsigned char basic_font[27][8] = {
     {0x18, 0x24, 0x42, 0x7E, 0x42, 0x42, 0x42, 0x00}, // A
     {0x7C, 0x42, 0x42, 0x7C, 0x42, 0x42, 0x7C, 0x00}, // B
@@ -37,7 +34,7 @@ unsigned char basic_font[27][8] = {
     {0x42, 0x42, 0x24, 0x18, 0x24, 0x42, 0x42, 0x00}, // X
     {0x42, 0x42, 0x24, 0x18, 0x08, 0x08, 0x08, 0x00}, // Y
     {0x7E, 0x02, 0x04, 0x08, 0x10, 0x20, 0x7E, 0x00}, // Z
-    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}  // [Space]
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}  // Space
 };
 
 void draw_pixel(int x, int y, unsigned int color) {
@@ -47,7 +44,7 @@ void draw_pixel(int x, int y, unsigned int color) {
 }
 
 void draw_char(char c, int x, int y, unsigned int color) {
-    int index = 26; // Default to space
+    int index = 26;
     if (c >= 'A' && c <= 'Z') index = c - 'A';
     if (c >= 'a' && c <= 'z') index = c - 'a';
 
@@ -55,7 +52,6 @@ void draw_char(char c, int x, int y, unsigned int color) {
         unsigned char bits = basic_font[index][row];
         for (int col = 0; col < 8; col++) {
             if (bits & (0x80 >> col)) {
-                // Draw target pixel scaled 2x for legibility
                 draw_pixel(x + (col * 2),     y + (row * 2),     color);
                 draw_pixel(x + (col * 2) + 1, y + (row * 2),     color);
                 draw_pixel(x + (col * 2),     y + (row * 2) + 1, color);
@@ -66,9 +62,10 @@ void draw_char(char c, int x, int y, unsigned int color) {
 }
 
 void hw_init(void) {
+    // Fill the screen with a solid canvas color
     for (int y = 0; y < SCREEN_HEIGHT; y++) {
         for (int x = 0; x < SCREEN_WIDTH; x++) {
-            draw_pixel(x, y, 0x001A2332); // Dark blue backdrop
+            draw_pixel(x, y, 0x001A2332);
         }
     }
 }
@@ -83,7 +80,7 @@ void hw_print(const char* str) {
             start_y += 20;
             continue;
         }
-        draw_char(str[i], start_x, start_y, 0x0000FF00); // Bright green text
+        draw_char(str[i], start_x, start_y, 0x0000FF00); // Draw text green
         start_x += 18;
     }
 }
