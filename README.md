@@ -4,7 +4,7 @@ An operating system designed to run on any device.
 
 Kask OS is a 64-bit multi-architecture operating system that features a custom kernel, a built-in shell, and a hierarchical in-memory file system.
 
-## 🚀 Features
+## Features
 
 - **Multi-Architecture 64-Bit Support:**
   - **x86_64:** Boots from GRUB via Multiboot1 in 32-bit protected mode, automatically configures identity-mapped page tables (using 2MB pages), transitions to 64-bit long mode, and executes the C kernel.
@@ -19,7 +19,7 @@ Kask OS is a 64-bit multi-architecture operating system that features a custom k
   - Target `x86_64`, `ARM64`, and `RISC-V 64` from a single `Makefile`.
   - Automated ISO image creation with GRUB.
 
-## 🛠️ Build Requirements
+## Build Requirements
 
 Please see the requirement files in the `kask-os` subdirectory for installation instructions:
 - [Linux Requirements](kask-os/requirements-linux.md)
@@ -36,7 +36,7 @@ make install-deps-linux
 make install-deps-macos
 ```
 
-## 🏗️ Building and Running
+## Building and Running
 
 1. **Navigate to the source directory:**
    ```bash
