@@ -1,15 +1,15 @@
-# Toolchain Configurations
-X86_CC = x86_64-elf-gcc
-X86_AS = x86_64-elf-as
-X86_LD = x86_64-elf-ld
+# Toolchain Configurations for Intel macOS (via Homebrew)
+X86_CC      = x86_64-elf-gcc
+X86_AS      = x86_64-elf-as
+X86_LD      = x86_64-elf-ld
 X86_OBJCOPY = x86_64-elf-objcopy
 
-ARM_CC = aarch64-linux-gnu-gcc
-ARM_AS = aarch64-linux-gnu-as
-ARM_LD = aarch64-linux-gnu-ld
-ARM_OBJCOPY = aarch64-linux-gnu-objcopy
+ARM_CC      = aarch64-elf-gcc
+ARM_AS      = aarch64-elf-as
+ARM_LD      = aarch64-elf-ld
+ARM_OBJCOPY = aarch64-elf-objcopy
 
-# Compilation flags for bare-metal targets
+# Common freestanding compilation flags
 CFLAGS = -ffreestanding -O2 -Wall -Wextra -nostdlib
 
 all: os_core.fat
