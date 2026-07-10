@@ -55,3 +55,31 @@ os_core.iso: kernel_x86.elf os_core.fat
 
 run-iso: os_core.iso
 	qemu-system-x86_64 -cdrom os_core.iso
+
+# --- Universal VM Disk Generation Target ---
+os_disk.img: kernel_x86.bin kernel_arm.bin os_core.fat
+	# 1. Create a clean staging directory
+	mkdir -p disk_staging/EFI/BOOT
+	
+	# 2. Copy the native binary slices into their standard UEFI designated positions
+	cp kernel_x86.bin disk_staging/EFI/BOOT/BOOTX64.EFI
+	cp kernel_arm.bin disk_staging/EFI/BOOT/BOOTAA64.EFI
+	cp os_core.fat disk_staging/EFI/BOOT/os_core.fat
+	
+	# 3. Allocate a blank 64MB raw hard drive image file
+	dd if=/dev/zero of=os_disk.img bs=1M count=64
+	
+	# 4. Format the raw hard disk image with a standard FAT32 file system partition
+	mkfs.vfat -F 32 os_disk.img
+	
+	# 5. Copy our entire UEFI structural tree directly into the virtual hard drive
+	mcopy -i os_disk.img -s disk_staging/* ::/
+	
+	@echo "[SUCCESS] Generated universal VM disk image: os_disk.img"
+
+# --- Execute hard disk mode simulations ---
+run-vm-x86: os_disk.img
+	qemu-system-x86_64 -bios /usr/local/share/qemu/edk2-x86_64-code.fd -drive file=os_disk.img,format=raw
+
+run-vm-arm: os_disk.img
+	qemu-system-aarch64 -M virt -cpu cortex-a57 -bios /usr/local/share/qemu/edk2-aarch64-code.fd -drive file=os_disk.img,format=raw
