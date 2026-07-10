@@ -25,6 +25,8 @@ Please see the requirement files in the `kask-os` subdirectory for installation 
 - [Linux Requirements](kask-os/requirements-linux.md)
 - [macOS Requirements](kask-os/requirements-macos.md)
 
+- Also if youre using macos instead of linux, change ```grub-mkrescue -o kask-os.iso iso_root``` in Makefile to ```i686-elf-grub-mkrescue -o kask-os.iso iso_root```
+
 Alternatively, you can quickly install all dependencies via the Makefile:
 ```bash
 # On Linux (Ubuntu/Debian)
