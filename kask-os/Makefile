@@ -39,14 +39,14 @@ endif
 # --- Common Flags ---
 COMMON_CFLAGS = -ffreestanding -O2 -Wall -Wextra -nostdlib -Ishared
 X86_CFLAGS    = $(COMMON_CFLAGS) -m64 -mcmodel=large -mno-red-zone -mno-sse -mno-mmx -mno-sse2 -fno-pic -fno-pie
-ARM_CFLAGS    = $(COMMON_CFLAGS)
+ARM_CFLAGS    = $(COMMON_CFLAGS) -march=armv8-a -mtune=cortex-a53
 RV_CFLAGS     = $(COMMON_CFLAGS) -march=rv64imac_zicsr -mabi=lp64
 
 # --- Kernel Sources (shared) ---
 KERN_SRCS = kernel/main.c kernel/string.c kernel/shell.c
 
 # --- Targets ---
-.PHONY: all clean x86 arm riscv iso info install-deps-linux install-deps-macos
+.PHONY: all clean x86 arm riscv iso kernel8.img rpi info install-deps-linux install-deps-macos
 
 all: kask_x86.elf
 
@@ -159,18 +159,38 @@ kask-os.iso: kask_x86.elf
 	cp kask_x86.elf iso_root/boot/kask_x86.elf
 	grub-mkrescue -o kask-os.iso iso_root 2>/dev/null
 
+# ---- Raspberry Pi raw binary ----
+kernel8.img: kask_arm.elf
+	$(ARM_OBJCOPY) -O binary kask_arm.elf kernel8.img
+	@echo "  --> kernel8.img ready ($(shell wc -c < kernel8.img) bytes)"
+
+rpi: kernel8.img
+	mkdir -p rpi_boot
+	cp kernel8.img rpi_boot/kernel8.img
+	cp rpi/config.txt rpi_boot/config.txt
+	@echo "  --> Copy rpi_boot/* to the root of a FAT32 SD card"
+	@echo "      (also copy bootcode.bin, start.elf, fixup.dat from RPi firmware)"
+
 # ============================================================
 # QEMU Run Targets
 # ============================================================
 
+# x86_64 — -vga std gives correct 640x480 VGA text-mode window (fixes 0x0 bug)
 run-x86: kask_x86.elf
-	qemu-system-x86_64 -kernel kask_x86.elf -no-reboot -no-shutdown
+	qemu-system-x86_64 -kernel kask_x86.elf -vga std -no-reboot -no-shutdown
 
 run-iso: kask-os.iso
-	qemu-system-x86_64 -cdrom kask-os.iso -no-reboot -no-shutdown
+	qemu-system-x86_64 -cdrom kask-os.iso -vga std -no-reboot -no-shutdown
 
+# ARM64 — raspi3b matches Pi Zero2W/Pi3 peripheral layout (0x3F000000)
 run-arm: kask_arm.elf
-	qemu-system-aarch64 -M virt -cpu cortex-a72 -m 256M -nographic -kernel kask_arm.elf
+	qemu-system-aarch64 -M raspi3b -cpu cortex-a53 -m 1G \
+		-kernel kask_arm.elf -serial stdio -display none
+
+# ARM64 — raspi4b matches Pi 4 peripheral layout (0xFE000000)
+run-arm-pi4: kask_arm.elf
+	qemu-system-aarch64 -M raspi4b -cpu cortex-a72 -m 2G \
+		-kernel kask_arm.elf -serial stdio -display none
 
 run-riscv: kask_riscv.elf
 	qemu-system-riscv64 -M virt -m 256M -nographic -bios none -kernel kask_riscv.elf

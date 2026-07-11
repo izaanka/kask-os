@@ -1,0 +1,20 @@
+# Raspberry Pi Boot Configuration for Kask OS
+# Place this file and kernel8.img on the root of a FAT32 SD card
+# alongside the standard RPi firmware files.
+
+# ---- Select 64-bit AArch64 kernel ----
+arm_64bit=1
+kernel=kernel8.img
+
+# ---- Enable UART0 on GPIO 14/15 at 48 MHz clock ----
+# Required for PL011 baud rate: IBRD=26, FBRD=3 → 115200 bps
+enable_uart=1
+core_freq=250
+
+# ---- Disable Bluetooth (frees UART0 from mini-UART conflict) ----
+# On Pi 3/Zero2W, BT normally uses UART0; this reassigns it to GPIO 14/15
+dtoverlay=disable-bt
+
+# ---- Pi 4 specific: ensure UART clock is 48 MHz ----
+# (Harmless on Pi 3/Zero2W)
+init_uart_clock=48000000

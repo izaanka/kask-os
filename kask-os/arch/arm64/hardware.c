@@ -2,91 +2,152 @@
 #include <stdint.h>
 
 /* ============================================================
- * Kask OS — ARM64 PL011 UART Driver
- * Works on: QEMU virt, Raspberry Pi, Apple Silicon VMs
+ * Kask OS — ARM64 Hardware Driver
+ * Runtime detection: Cortex-A72 (part 0xD08) = Pi 4 (BCM2711)
+ *                    Cortex-A53 (part 0xD03) = Pi Zero2W/Pi3 (BCM2837)
+ * GPIO 14/15 are mux'd to UART0 (Alt0). UART clock = 48 MHz.
  * ============================================================ */
 
-/* PL011 UART base address for QEMU virt machine */
-#define UART_BASE 0x09000000
+#define PERIPH_PI3  0x3F000000u   /* BCM2837 (Pi Zero2W, Pi 3) */
+#define PERIPH_PI4  0xFE000000u   /* BCM2711 (Pi 4) */
 
-#define UART_DR   (*(volatile uint32_t*)(UART_BASE + 0x00))  /* Data Register */
-#define UART_FR   (*(volatile uint32_t*)(UART_BASE + 0x18))  /* Flag Register */
-#define UART_IBRD (*(volatile uint32_t*)(UART_BASE + 0x24))  /* Integer Baud Rate */
-#define UART_FBRD (*(volatile uint32_t*)(UART_BASE + 0x28))  /* Fractional Baud Rate */
-#define UART_LCRH (*(volatile uint32_t*)(UART_BASE + 0x2C))  /* Line Control */
-#define UART_CR   (*(volatile uint32_t*)(UART_BASE + 0x30))  /* Control Register */
-#define UART_IMSC (*(volatile uint32_t*)(UART_BASE + 0x38))  /* Interrupt Mask */
+static volatile uint32_t* _gpio = (volatile uint32_t*)0;
+static volatile uint32_t* _uart = (volatile uint32_t*)0;
+static uint32_t _periph_base = 0;
 
-#define FR_TXFF  (1 << 5)  /* Transmit FIFO Full */
-#define FR_RXFE  (1 << 4)  /* Receive FIFO Empty */
+/* ---- CPU part detection ---- */
+static uint32_t detect_periph_base(void) {
+    uint64_t midr;
+    __asm__ volatile("mrs %0, midr_el1" : "=r"(midr));
+    /* PartNum = bits[15:4]; Cortex-A72 = 0xD08 → Pi 4 */
+    return (((uint32_t)(midr >> 4)) & 0xFFFu) == 0xD08u
+           ? PERIPH_PI4 : PERIPH_PI3;
+}
 
+/* ---- Busy-wait N NOPs ---- */
+static void spin(uint32_t n) {
+    while (n--) __asm__ volatile("nop");
+}
+
+/* ---- GPIO pin function select (3-bit field per pin) ----
+ * Registers GPFSEL0-5 at GPIO_BASE + 0x00..0x14, 10 pins each.
+ * Alt0 = 0b100 = 4 (UART0 TXD/RXD on GPIO 14/15).
+ */
+static void gpio_fsel(uint32_t pin, uint32_t func) {
+    volatile uint32_t* fsel = _gpio + (pin / 10u); /* +0,+1,+2... */
+    uint32_t shift = (pin % 10u) * 3u;
+    uint32_t v = *fsel;
+    v &= ~(7u << shift);
+    v |=  (func & 7u) << shift;
+    *fsel = v;
+}
+
+/* ---- BCM2837 pull-up/down disable (GPPUD + GPPUDCLK) ---- */
+static void gpio_pull_off_2837(uint32_t pin) {
+    volatile uint32_t* gppud     = _gpio + (0x94u / 4u);
+    volatile uint32_t* gppudclk0 = _gpio + (0x98u / 4u);
+    *gppud     = 0u;
+    spin(150u);
+    *gppudclk0 = 1u << pin;
+    spin(150u);
+    *gppud     = 0u;
+    *gppudclk0 = 0u;
+}
+
+/* ---- BCM2711 pull disable (GPPUPPDN0, 2-bits per GPIO, 00=no pull) ---- */
+static void gpio_pull_off_2711(uint32_t pin) {
+    volatile uint32_t* r = _gpio + (0xE4u / 4u) + (pin / 16u);
+    uint32_t shift = (pin % 16u) * 2u;
+    *r = (*r) & ~(3u << shift);
+}
+
+/* ---- UART0 (PL011) register helper ---- */
+#define UART_OFF_DR   0x00u
+#define UART_OFF_FR   0x18u
+#define UART_OFF_IBRD 0x24u
+#define UART_OFF_FBRD 0x28u
+#define UART_OFF_LCRH 0x2Cu
+#define UART_OFF_CR   0x30u
+#define UART_OFF_ICR  0x44u
+#define FR_TXFF (1u << 5)
+#define FR_RXFE (1u << 4)
+
+static inline void   uw(uint32_t off, uint32_t v){ *(_uart + off/4u) = v; }
+static inline uint32_t ur(uint32_t off)          { return *(_uart + off/4u); }
+
+/* ============================================================
+ * hw_init — detect SoC, configure GPIO 14/15, init PL011 UART
+ * ============================================================ */
 void hw_init(void) {
-    /* Disable UART */
-    UART_CR = 0;
+    _periph_base = detect_periph_base();
+    _gpio = (volatile uint32_t*)(uintptr_t)(_periph_base + 0x200000u);
+    _uart = (volatile uint32_t*)(uintptr_t)(_periph_base + 0x201000u);
 
-    /* Set baud rate (115200 @ 24MHz clock) */
-    UART_IBRD = 13;
-    UART_FBRD = 1;
+    /* Disable UART and clear interrupts */
+    uw(UART_OFF_CR, 0u);
+    uw(UART_OFF_ICR, 0x7FFu);
 
-    /* 8 data bits, no parity, 1 stop bit, enable FIFO */
-    UART_LCRH = (3 << 5) | (1 << 4);
+    /* GPIO 14 = TXD0, GPIO 15 = RXD0, Alt0 = func 4 */
+    gpio_fsel(14u, 4u);
+    gpio_fsel(15u, 4u);
 
-    /* Mask all interrupts */
-    UART_IMSC = 0;
+    /* Disable pull-up/down on UART pins */
+    if (_periph_base == PERIPH_PI4) {
+        gpio_pull_off_2711(14u);
+        gpio_pull_off_2711(15u);
+    } else {
+        gpio_pull_off_2837(14u);
+        gpio_pull_off_2837(15u);
+    }
 
-    /* Enable UART, TX, RX */
-    UART_CR = (1 << 0) | (1 << 8) | (1 << 9);
+    /*
+     * Baud-rate divisors for 48 MHz UART clock (RPi firmware default
+     * when enable_uart=1 in config.txt) at 115200 bps:
+     *   Divisor = 48000000 / (16 × 115200) = 26.0416…
+     *   IBRD = 26,  FBRD = round(0.0416… × 64) = 3
+     */
+    uw(UART_OFF_IBRD, 26u);
+    uw(UART_OFF_FBRD, 3u);
+
+    /* 8 data bits, 1 stop bit, no parity, FIFO enable */
+    uw(UART_OFF_LCRH, (3u << 5) | (1u << 4));
+
+    /* Enable UART + TX + RX */
+    uw(UART_OFF_CR, (1u << 0) | (1u << 8) | (1u << 9));
 }
 
+/* ---- TX ---- */
 void hw_putchar(char c) {
-    /* Wait until TX FIFO is not full */
-    while (UART_FR & FR_TXFF)
-        ;
-    UART_DR = (uint32_t)c;
-    /* Send \r before \n for proper terminal behavior */
+    while (ur(UART_OFF_FR) & FR_TXFF);
+    uw(UART_OFF_DR, (uint32_t)(unsigned char)c);
     if (c == '\n') {
-        while (UART_FR & FR_TXFF)
-            ;
-        UART_DR = '\r';
+        while (ur(UART_OFF_FR) & FR_TXFF);
+        uw(UART_OFF_DR, '\r');
     }
 }
 
-void hw_print(const char* str) {
-    for (int i = 0; str[i] != '\0'; i++) {
-        hw_putchar(str[i]);
-    }
+void hw_print(const char* s) {
+    while (*s) hw_putchar(*s++);
 }
 
+/* ---- RX ---- */
 char hw_getchar(void) {
-    /* Wait until RX FIFO is not empty */
-    while (UART_FR & FR_RXFE)
-        ;
-    char c = (char)(UART_DR & 0xFF);
-
-    /* Echo the character */
-    if (c == '\r') c = '\n';
-    return c;
+    while (ur(UART_OFF_FR) & FR_RXFE);
+    char c = (char)(ur(UART_OFF_DR) & 0xFFu);
+    return (c == '\r') ? '\n' : c;
 }
 
-void hw_clear_screen(void) {
-    /* ANSI escape: clear screen + move cursor home */
-    hw_print("\033[2J\033[H");
-}
+/* ---- Display helpers (ANSI over serial) ---- */
+void hw_clear_screen(void) { hw_print("\033[2J\033[H"); }
 
 void hw_set_color(uint8_t color) {
-    /* Map VGA color codes to ANSI escape sequences */
-    static const char* ansi_fg[] = {
-        "\033[30m", "\033[34m", "\033[32m", "\033[36m",   /* 0-3: black,blue,green,cyan */
-        "\033[31m", "\033[35m", "\033[33m", "\033[37m",   /* 4-7: red,magenta,brown,lgray */
-        "\033[90m", "\033[94m", "\033[92m", "\033[96m",   /* 8-B: dgray,lblue,lgreen,lcyan */
-        "\033[91m", "\033[95m", "\033[93m", "\033[97m"    /* C-F: lred,lmagenta,yellow,white */
+    static const char* fg[16] = {
+        "\033[30m","\033[34m","\033[32m","\033[36m",
+        "\033[31m","\033[35m","\033[33m","\033[37m",
+        "\033[90m","\033[94m","\033[92m","\033[96m",
+        "\033[91m","\033[95m","\033[93m","\033[97m"
     };
-    uint8_t fg = color & 0x0F;
-    if (fg < 16) {
-        hw_print(ansi_fg[fg]);
-    }
+    hw_print(fg[color & 0x0Fu]);
 }
 
-uint8_t hw_get_color(void) {
-    return 0x0F; /* Always report white — ANSI state not tracked */
-}
+uint8_t hw_get_color(void) { return 0x0Fu; }
