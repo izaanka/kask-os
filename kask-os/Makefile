@@ -175,12 +175,17 @@ rpi: kernel8.img
 # QEMU Run Targets
 # ============================================================
 
-# x86_64 — -vga std gives correct 640x480 VGA text-mode window (fixes 0x0 bug)
+# x86_64 — GTK window with zoom-to-fit: resizable, content scales to fill window
+# Fixes the "incredibly small 640x400" VGA text mode window on modern displays.
+QEMU_DISPLAY = -display gtk,zoom-to-fit=on,show-menubar=off
+
 run-x86: kask_x86.elf
-	qemu-system-x86_64 -kernel kask_x86.elf -vga std -no-reboot -no-shutdown
+	qemu-system-x86_64 -kernel kask_x86.elf -vga std $(QEMU_DISPLAY) \
+		-no-reboot -no-shutdown
 
 run-iso: kask-os.iso
-	qemu-system-x86_64 -cdrom kask-os.iso -vga std -no-reboot -no-shutdown
+	qemu-system-x86_64 -cdrom kask-os.iso -vga std $(QEMU_DISPLAY) \
+		-no-reboot -no-shutdown
 
 # ARM64 — raspi3b matches Pi Zero2W/Pi3 peripheral layout (0x3F000000)
 run-arm: kask_arm.elf
